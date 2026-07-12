@@ -1,0 +1,82 @@
+esphome:
+  name: cc1101
+  friendly_name: cc1101
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  services:
+    - service: posalji_paket
+      variables:
+        hex_paket: string
+      then:
+        - lambda: |-
+            ESP_LOGD("cc1101", "Servis pozvan! hex_paket = %s", hex_paket.c_str());
+        - cc1101.begin_tx:
+        - lambda: |-
+            std::string hex = hex_paket;
+            std::vector<uint8_t> data;
+
+            hex.erase(std::remove(hex.begin(), hex.end(), ' '), hex.end());
+
+            for (size_t i = 0; i + 1 < hex.size(); i += 2) {
+              std::string byte_str = hex.substr(i, 2);
+              uint8_t byte = (uint8_t)strtol(byte_str.c_str(), nullptr, 16);
+              data.push_back(byte);
+            }
+
+            while (data.size() < 8) data.push_back(0x00);
+            data.resize(8);
+
+            id(packet_to_send) = data;
+            ESP_LOGD("cc1101", "Šaljem paket: %s", format_hex(data).c_str());
+
+        - cc1101.send_packet:
+            data: !lambda "return id(packet_to_send);"
+
+        - delay: 10ms
+        - cc1101.begin_rx:
+
+ota:
+  - platform: esphome
+    password: "a40fe9f5e8c66807430c4282029449a4"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Cc1101 Fallback Hotspot"
+    password: "pwzjOzyYh9jl"
+
+captive_portal:
+
+spi:
+  clk_pin: GPIO4
+  mosi_pin: GPIO6
+  miso_pin: GPIO5
+
+globals:
+  - id: packet_to_send
+    type: std::vector<uint8_t>
+    restore_value: no
+
+cc1101:
+  id: cc1101_radio
+  cs_pin: GPIO7
+  gdo0_pin: GPIO2
+  frequency: 433.92MHz
+  modulation_type: GFSK
+  symbol_rate: 4800
+  packet_mode: true
+  packet_length: 8
+  on_packet:
+    then:
+      - lambda: |-
+          char hex[256];
+          ESP_LOGD("cc1101", "Primljeno: %s | freq_offset %.0f Hz | rssi %.1f dBm | lqi %u",
+                   format_hex_to(hex, x), freq_offset, rssi, lqi);
